@@ -92,29 +92,24 @@ return /******/ (function(modules) { // webpackBootstrap
 	var ReactDOM = __webpack_require__(4);
 	var Chart = __webpack_require__(5);
 
-	// // Hook into main event handler
-	var parentEventHandler = Chart.Controller.prototype.eventHandler;
-	Chart.Controller.prototype.eventHandler = function() {
-	  var ret = parentEventHandler.apply(this, arguments);
-	  if (this.scales['y-axis-0']) {
+	function drawVert(me, eventPosition) {
+	  if (me.scales['y-axis-0']) {
 
-	    this.clear();
-	    this.draw();
+	    me.clear();
+	    me.draw();
 
-	    var yScale = this.scales['y-axis-0'];
+	    var yScale = me.scales['y-axis-0'];
 
 	    // Draw the vertical line here
-	    var eventPosition = Chart.helpers.getRelativePosition(arguments[0], this.chart);
-	    this.chart.ctx.beginPath();
-	    this.chart.ctx.moveTo(eventPosition.x, yScale.getPixelForValue(yScale.max));
-	    this.chart.ctx.strokeStyle = "#7D7D7D";
-	    this.chart.ctx.lineTo(eventPosition.x, yScale.getPixelForValue(yScale.min));
-	    this.chart.ctx.stroke();
+	    me.chart.ctx.beginPath();
+	    me.chart.ctx.moveTo(eventPosition.x, yScale.getPixelForValue(yScale.max));
+	    me.chart.ctx.strokeStyle = "#7D7D7D";
+	    me.chart.ctx.lineTo(eventPosition.x, yScale.getPixelForValue(yScale.min));
+	    me.chart.ctx.stroke();
 	  }
-	  return ret;
-	};
+	}
 
-	/* HOT PATCH GetElementsAtEvent */
+	/* X-intercept hovering */
 	Chart.Controller.prototype.getElementsAtEvent = function(e) {
 	  var helpers = Chart.helpers;
 	  var eventPosition = helpers.getRelativePosition(e, this.chart);
@@ -148,6 +143,94 @@ return /******/ (function(modules) { // webpackBootstrap
 
 	  return elementsArray;
 	};
+
+	/*
+	  Override default eventHandler to add vert in Line Charts
+	  (NOTE: the only conditional for this is chartInstance.scales['y-axis-0']
+	  When we add more graph types (namely bar), we'll need to check for Chart.type as well
+	*/
+	Chart.Controller.prototype.eventHandler = function(e) {
+	  var helpers = Chart.helpers;
+	  var me = this;
+	  var tooltip = me.tooltip;
+	  var options = me.options || {};
+	  var hoverOptions = options.hover;
+	  var tooltipsOptions = options.tooltips;
+	  var eventPosition = helpers.getRelativePosition(e, this.chart);
+
+	  me.lastActive = me.lastActive || [];
+	  me.lastTooltipActive = me.lastTooltipActive || [];
+
+	  // Find Active Elements for hover and tooltips
+	  if (e.type === 'mouseout') {
+	    me.active = [];
+	    me.tooltipActive = [];
+	  } else {
+	    me.active = me.getElementsAtEventForMode(e, hoverOptions.mode);
+	    me.tooltipActive =  me.getElementsAtEventForMode(e, tooltipsOptions.mode);
+	  }
+
+	  // On Hover hook
+	  if (hoverOptions.onHover) {
+	    hoverOptions.onHover.call(me, me.active);
+	  }
+
+	  if (e.type === 'mouseup' || e.type === 'click') {
+	    if (options.onClick) {
+	      options.onClick.call(me, e, me.active);
+	    }
+	    if (me.legend && me.legend.handleEvent) {
+	      me.legend.handleEvent(e);
+	    }
+	  }
+
+	  // Remove styling for last active (even if it may still be active)
+	  if (me.lastActive.length) {
+	    me.updateHoverStyle(me.lastActive, hoverOptions.mode, false);
+	  }
+
+	  // Built in hover styling
+	  if (me.active.length && hoverOptions.mode) {
+	    me.updateHoverStyle(me.active, hoverOptions.mode, true);
+	  }
+
+	  // Built in Tooltips
+	  if (tooltipsOptions.enabled || tooltipsOptions.custom) {
+	    tooltip.initialize();
+	    tooltip._active = me.tooltipActive;
+	    tooltip.update(true);
+	  }
+
+
+	  // Hover animations
+	  tooltip.pivot();
+
+	  if (!me.animating) {
+	    // If entering, leaving, or changing elements, animate the change via pivot
+	    if (!helpers.arrayEquals(me.active, me.lastActive) ||
+	      !helpers.arrayEquals(me.tooltipActive, me.lastTooltipActive)) {
+
+	      me.stop();
+
+	      if (tooltipsOptions.enabled || tooltipsOptions.custom) {
+	        tooltip.update(true);
+	      }
+
+	      // We only need to render at this point. Updating will cause scales to be
+	      // recomputed generating flicker & using more memory than necessary.
+
+	      // STAGE.GG: override call below - Redux handles this
+	      // me.render(hoverOptions.animationDuration, true);
+	    }
+	  }
+
+	  drawVert(me, eventPosition);
+	  // Remember Last Actives
+	  me.lastActive = me.active;
+	  me.lastTooltipActive = me.tooltipActive;
+	  return me;
+	}
+
 
 	module.exports = {
 	  createClass: function(chartType, methodNames, dataKey) {
